@@ -19,9 +19,5 @@ All saved in the folder you selected:
     x_y.jpg: Webcam snapshot for each point (e.g., 420_310.jpg)
 
 Please organize the files like (if you play 3 times):
-    data:
-        --Your_name:
-            --0001
-            --0002
-            --0003
+    ![Alt text for the image](https://github.com/harryshu1997/Eye-Tracking-ViT/blob/main/tree.png)
             
