@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Gaze Game: Click the Dot!</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      width: 100%;
+      overflow: hidden;
+      font-family: sans-serif;
+      background: #222;
+      color: #fff;
+      position: relative;
+    }
+    /* Video fills the screen in the background */
+    #video {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      z-index: 1;
+    }
+    /* Dot displayed over the video */
+    #dot {
+      position: absolute;
+      width: 30px;
+      height: 30px;
+      background-color: red;
+      border-radius: 50%;
+      cursor: pointer;
+      z-index: 2;
+    }
+    /* Control buttons & status text */
+    #controls {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      z-index: 3;
+    }
+    button {
+      padding: 8px 16px;
+      margin: 5px;
+      font-size: 1em;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+
+<div id="controls">
+  <button id="selectFolderBtn">Select Save Folder</button>
+  <button id="startBtn">Start Game</button>
+  <span id="status">Waiting...</span>
+</div>
+
+<video id="video" autoplay playsinline></video>
+<div id="dot" style="display:none;"></div>
+
+<script>
+  // Global variables
+  let gridPoints = [];
+  let randomPoints = [];
+  let currentPointIndex = 0;
+  let captureData = []; // Array of objects: {x, y, filename}
+  let saveFolderHandle = null;
+  
+  const video = document.getElementById('video');
+  const dot = document.getElementById('dot');
+  const statusEl = document.getElementById('status');
+  const selectFolderBtn = document.getElementById('selectFolderBtn');
+  const startBtn = document.getElementById('startBtn');
+
+  // Generate a 4x4 grid that evenly covers the viewport (with a margin)
+  function generateGridPoints() {
+    const rows = 4, cols = 4;
+    const marginX = 50, marginY = 50;
+    const availableWidth = window.innerWidth - 2 * marginX;
+    const availableHeight = window.innerHeight - 2 * marginY;
+    const pts = [];
+    for (let row = 0; row < rows; row++) {
+      for (let col = 0; col < cols; col++) {
+        const x = marginX + (availableWidth * col) / (cols - 1);
+        const y = marginY + (availableHeight * row) / (rows - 1);
+        pts.push({ x, y });
+      }
+    }
+    return pts;
+  }
+
+  // Shuffle array (Fisher-Yates)
+  function shuffleArray(array) {
+    for (let i = array.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [array[i], array[j]] = [array[j], array[i]];
+    }
+    return array;
+  }
+
+  // Initialize the webcam
+  async function initCamera() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      video.srcObject = stream;
+      statusEl.innerText = "Camera initialized.";
+    } catch (err) {
+      alert("Error accessing camera: " + err);
+      statusEl.innerText = "Camera error.";
+    }
+  }
+
+  // Request full screen mode
+  async function requestFullscreen() {
+    if (!document.fullscreenElement) {
+      await document.documentElement.requestFullscreen();
+    }
+  }
+
+  // Let the user select a folder for saving files
+  async function selectSaveFolder() {
+    try {
+      saveFolderHandle = await window.showDirectoryPicker();
+      statusEl.innerText = "Save folder selected.";
+    } catch (err) {
+      alert("Folder selection canceled or failed: " + err);
+      statusEl.innerText = "No folder selected.";
+    }
+  }
+
+  // Save binary data to a file in the selected folder
+  async function saveFile(filename, dataBytes) {
+    if (!saveFolderHandle) {
+      console.warn("No folder selected.");
+      return;
+    }
+    try {
+      const fileHandle = await saveFolderHandle.getFileHandle(filename, { create: true });
+      const writable = await fileHandle.createWritable();
+      await writable.write(dataBytes);
+      await writable.close();
+      console.log("Saved:", filename);
+    } catch (err) {
+      console.error("Error saving file:", err);
+    }
+  }
+
+  // Save JSON data to a file
+  async function saveJSON(filename, jsonData) {
+    const jsonString = JSON.stringify(jsonData, null, 2);
+    const encoder = new TextEncoder();
+    const dataBytes = encoder.encode(jsonString);
+    await saveFile(filename, dataBytes);
+  }
+
+  // Save an image (from Base64 data URL) to a file
+  async function saveImage(filename, imageDataURL) {
+    const base64Data = imageDataURL.split(',')[1];
+    const binaryStr = atob(base64Data);
+    const len = binaryStr.length;
+    const bytes = new Uint8Array(len);
+    for (let i = 0; i < len; i++) {
+      bytes[i] = binaryStr.charCodeAt(i);
+    }
+    await saveFile(filename, bytes);
+  }
+
+  // Capture a snapshot from the video and save it with filename "x_y.jpg"
+  async function captureSnapshot(x, y) {
+    const canvas = document.createElement("canvas");
+    canvas.width = video.videoWidth || 640;
+    canvas.height = video.videoHeight || 480;
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    const imageDataURL = canvas.toDataURL("image/jpeg");
+    // Use rounded coordinates for filename
+    const filename = `${Math.round(x)}_${Math.round(y)}.jpg`;
+    await saveImage(filename, imageDataURL);
+    // Record the capture data
+    captureData.push({ x: Math.round(x), y: Math.round(y), filename });
+    console.log("Captured image at", x, y);
+  }
+
+  // When the user clicks on the dot, capture an image and then move to the next point
+  async function dotClicked() {
+    // Get the current dot coordinates
+    const { x, y } = randomPoints[currentPointIndex];
+    await captureSnapshot(x, y);
+    currentPointIndex++;
+    if (currentPointIndex < randomPoints.length) {
+      updateDot();
+    } else {
+      statusEl.innerText = "All points captured. Saving JSON...";
+      await saveJSON("capture_data.json", captureData);
+      statusEl.innerText = "Game complete and JSON saved!";
+      dot.style.display = "none";
+    }
+  }
+
+  // Update the dot's position and display it
+  function updateDot() {
+    if (currentPointIndex >= randomPoints.length) return;
+    const { x, y } = randomPoints[currentPointIndex];
+    dot.style.left = x - 15 + "px"; // center the 30px dot
+    dot.style.top = y - 15 + "px";
+    dot.style.display = "block";
+    statusEl.innerText = `Click the dot at (${Math.round(x)}, ${Math.round(y)})`;
+  }
+
+  // Start the game: go full screen, initialize camera, generate grid, shuffle points, then wait for clicks
+  async function startGame() {
+    await requestFullscreen();
+    await initCamera();
+    // Generate a grid (4x4) and shuffle the points for a random order
+    gridPoints = generateGridPoints();
+    randomPoints = shuffleArray(gridPoints.slice());
+    currentPointIndex = 0;
+    updateDot();
+  }
+
+  // Event listeners
+  selectFolderBtn.addEventListener("click", selectSaveFolder);
+  startBtn.addEventListener("click", startGame);
+  // When the dot is clicked, handle the capture.
+  dot.addEventListener("click", dotClicked);
+</script>
+
+</body>
+</html>
