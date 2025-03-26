@@ -68,6 +68,7 @@
   let currentPointIndex = 0;
   let captureData = []; // Array of objects: {x, y, filename}
   let saveFolderHandle = null;
+  let saveImageHandle = null;
   
   const video = document.getElementById('video');
   const dot = document.getElementById('dot');
@@ -120,6 +121,22 @@
     }
   }
 
+  async function updateImageHandler() {
+    const folderMap = new Map();
+    for await (const entry of saveFolderHandle.values()) {
+          if(entry.kind == 'directory') {
+            console.log(parseInt(entry.name));
+            folderMap.set(parseInt(entry.name), 1);
+          }
+      }
+      let id = 0;
+      do {
+        ++id;
+        console.log(folderMap.has(id));
+      }while(folderMap.has(id));
+      saveImageHandle = await saveFolderHandle.getDirectoryHandle(id, {create: true});
+  }
+
   // Let the user select a folder for saving files
   async function selectSaveFolder() {
     try {
@@ -138,7 +155,7 @@
       return;
     }
     try {
-      const fileHandle = await saveFolderHandle.getFileHandle(filename, { create: true });
+      const fileHandle = await saveImageHandle.getFileHandle(filename, { create: true });
       const writable = await fileHandle.createWritable();
       await writable.write(dataBytes);
       await writable.close();
@@ -177,7 +194,7 @@
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
     const imageDataURL = canvas.toDataURL("image/jpeg");
     // Use rounded coordinates for filename
-    const filename = `${Math.round(x)}_${Math.round(y)}.jpg`;
+    const filename = 'image' + currentPointIndex + '.jpg';
     await saveImage(filename, imageDataURL);
     // Record the capture data
     captureData.push({ x: Math.round(x), y: Math.round(y), filename });
@@ -188,8 +205,8 @@
   async function dotClicked() {
     // Get the current dot coordinates
     const { x, y } = randomPoints[currentPointIndex];
-    await captureSnapshot(x, y);
     currentPointIndex++;
+    await captureSnapshot(x, y);
     if (currentPointIndex < randomPoints.length) {
       updateDot();
     } else {
@@ -212,6 +229,7 @@
 
   // Start the game: go full screen, initialize camera, generate grid, shuffle points, then wait for clicks
   async function startGame() {
+    await updateImageHandler();
     await requestFullscreen();
     await initCamera();
     // Generate a grid (4x4) and shuffle the points for a random order
