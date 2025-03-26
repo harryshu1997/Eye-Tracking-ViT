@@ -211,7 +211,10 @@
       updateDot();
     } else {
       statusEl.innerText = "All points captured. Saving JSON...";
-      await saveJSON("capture_data.json", captureData);
+      data = {width: window.screen.availHeight, height:
+        window.screen.availWidth};
+      data['image_data'] = captureData;
+      await saveJSON("capture_data.json", data);
       statusEl.innerText = "Game complete and JSON saved!";
       dot.style.display = "none";
     }
