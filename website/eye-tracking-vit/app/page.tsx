@@ -56,9 +56,9 @@ export default function Page() {
         ref={cursorRef}
         style={{
           position: 'absolute',
-          width: '20px',
-          height: '20px',
-          background: 'red',
+          width: '15px',
+          height: '15px',
+          background: 'green',
           borderRadius: '50%',
           pointerEvents: 'none',
         }}
