@@ -99,5 +99,63 @@ def main():
     else:
         print(f"Direction: {direction}")
 
-if __name__ == "__main__":
-    main()
+def predict(img : Image, width, height):
+
+    # 1. Define transforms (same as training)
+    transform = transforms.Compose([
+        transforms.Resize((224, 224)),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                             std=[0.229, 0.224, 0.225])
+    ])
+
+    # 2. Load image and apply transforms
+    img_tensor = transform(img).unsqueeze(0)  # shape: [1, 3, 224, 224]
+
+    # 3. Instantiate model & load weights
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = ViTCoordinateRegressor(model_name='timm/vit_base_patch16_224', num_outputs=2)
+    model.load_state_dict(torch.load("checkpoints/vit_coordinate_regressor.pth", map_location=device))
+    model.to(device)
+    model.eval()
+
+    # 4. Predict (model outputs normalized coordinates)
+    with torch.no_grad():
+        img_tensor = img_tensor.to(device)
+        output = model(img_tensor)  # shape: [1, 2]
+        pred_x_norm, pred_y_norm = output[0].cpu().tolist()
+
+    # 5. Convert normalized predictions to pixel coordinates
+    pred_x = pred_x_norm * width
+    pred_y = pred_y_norm * height
+
+    # 6. Compute direction relative to screen center.
+    center_x = width / 2.0
+    center_y = width / 2.0
+    # Compute vector from center to prediction.
+    dx = pred_x - center_x
+    dy = pred_y - center_y
+    distance = math.sqrt(dx**2 + dy**2)
+
+    # Define threshold for "Rest" (if within threshold pixels of center, output "Rest")
+    threshold = 100.0
+
+    if distance < threshold:
+        direction = "静止"  # Rest
+    else:
+        # In the image coordinate system, with (0,0) at top-left and y increasing downward,
+        # to get a compass direction with 0° as north we compute:
+        # angle = (atan2(-dx, -dy) + 360) % 360
+        angle_rad = math.atan2(-dx, -dy)
+        angle_deg = (math.degrees(angle_rad) + 360) % 360
+        direction = quantize_direction(angle_deg)
+
+    print(f"Predicted coordinate: ({pred_x:.2f}, {pred_y:.2f})")
+    if direction == "静止":
+        print(f"Direction: {direction} (within {threshold} pixels of center)")
+    else:
+        print(f"Direction: {direction}")
+    return pred_x, pred_y, direction
+
+# if __name__ == "__main__":
+#     main()

@@ -64,6 +64,6 @@ Thumbs.db
 checkpoints/
 
 # Data files (if these are large or you want to keep them out of version control)
-# data/
+data/
 
 model/checkpoints/
