@@ -10,7 +10,7 @@ from model import ViTCoordinateRegressor
 
 def main():
     # 1. Define paths
-    data_dir = "../data"  # path to your data folder
+    data_dir = "/home/monsterharry/Documents/eye-tracking-vit/Eye-Tracking-ViT/data"  # path to your data folder
     json_path = os.path.join(data_dir, "capture_data.json")  # path to JSON file
 
 
@@ -37,6 +37,10 @@ def main():
     train_size = len(dataset) - val_size
     train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
 
+    # Enable label jittering for training only
+    train_dataset.dataset.training = True
+    val_dataset.dataset.training = False
+
     # 5. Create dataloaders
     train_loader = DataLoader(train_dataset, batch_size=16, shuffle=True, num_workers=4)
     val_loader = DataLoader(val_dataset, batch_size=16, shuffle=False, num_workers=4)
@@ -51,7 +55,7 @@ def main():
     optimizer = optim.Adam(model.parameters(), lr=1e-4)
 
     # 8. Training loop
-    num_epochs = 100
+    num_epochs = 20
     for epoch in range(num_epochs):
         # ---- Training ----
         model.train()
