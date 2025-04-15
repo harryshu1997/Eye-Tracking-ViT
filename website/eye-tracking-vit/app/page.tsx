@@ -3,7 +3,8 @@ import { useEffect, useRef } from "react";
 export default function Page() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const cursorRef = useRef<HTMLDivElement>(null);
-
+  const currentPos = useRef({ x: 0, y: 0 });
+  const targetPos = useRef({ x: 0, y: 0 });
   useEffect(() => {
     if (typeof window === 'undefined') return 
     // Get webcam stream
@@ -33,17 +34,37 @@ export default function Page() {
       )
       const formData = new FormData()
       formData.append("file", blob, "eye.jpg")
+      formData.append("screen_width", window.innerWidth.toString())
+      formData.append("screen_height", window.innerHeight.toString())
       const res = await fetch('http://localhost:8000/predict', {
         method: 'POST',
         body: formData,
       })
       const { x, y, direction } = await res.json()
-      if (cursorRef.current) {
-        cursorRef.current.style.left = `${x}px`
-        cursorRef.current.style.top = `${y}px`
-      }
+      targetPos.current = {x, y}
       console.log(x, y, direction)
+
     }
+      // if (cursorRef.current) {
+      //   cursorRef.current.style.left = `${x}px` // Fix this so it moves gradually
+      //   cursorRef.current.style.top = `${y}px`
+      // }
+      // console.log(x, y, direction)
+    const animateCursor = () => {
+    if (cursorRef.current) {
+      // LERP = linear interpolation
+      const lerp = (start : number, end : number, t : number) => start + (end - start) * t
+
+      currentPos.current.x = lerp(currentPos.current.x, targetPos.current.x, 0.05)
+      currentPos.current.y = lerp(currentPos.current.y, targetPos.current.y, 0.05)
+
+      cursorRef.current.style.left = '0px'//`${currentPos.current.x}px`
+      cursorRef.current.style.top = '0px' //`${currentPos.current.y}px`
+      }
+
+    requestAnimationFrame(animateCursor)
+    }
+    requestAnimationFrame(animateCursor)
     const interval = setInterval(sendFrame, 1000) 
     return () => clearInterval(interval)
   }, []);
