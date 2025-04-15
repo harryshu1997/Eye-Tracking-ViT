@@ -44,107 +44,87 @@ def run_inference(img: Image.Image, width: float, height: float, smooth=False, m
     ])
     img_tensor = transform(img).unsqueeze(0)
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = ViTCoordinateRegressor(model_name='timm/vit_base_patch16_224', num_outputs=2)
-    model.load_state_dict(torch.load("checkpoints/vit_coordinate_regressor.pth", map_location=device))
-    model.to(device)
-    model.eval()
+#     # 3. Instantiate model & load weights
+#     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+#     model = ViTCoordinateRegressor(model_name='timm/vit_base_patch16_224', num_outputs=2)
+#     model.load_state_dict(torch.load("checkpoints/vit_coordinate_regressor.pth", map_location=device))
+#     model.to(device)
+#     model.eval()
 
+#     # 4. Predict (model outputs normalized coordinates)
+#     with torch.no_grad():
+#         img_tensor = img_tensor.to(device)
+#         output = model(img_tensor)  # shape: [1, 2]
+#         pred_x_norm, pred_y_norm = output[0].cpu().tolist()
+
+#     # 5. Convert normalized predictions to pixel coordinates
+#     pred_x = pred_x_norm * normal_width
+#     pred_y = pred_y_norm * normal_height
+
+#     # 6. Compute direction relative to screen center.
+#     center_x = normal_width / 2.0
+#     center_y = normal_height / 2.0
+#     # Compute vector from center to prediction.
+#     dx = pred_x - center_x
+#     dy = pred_y - center_y
+#     distance = math.sqrt(dx**2 + dy**2)
+
+#     # Define threshold for "Rest" (if within threshold pixels of center, output "Rest")
+#     threshold = 100.0
+
+#     if distance < threshold:
+#         direction = "静止"  # Rest
+#     else:
+#         # In the image coordinate system, with (0,0) at top-left and y increasing downward,
+#         # to get a compass direction with 0° as north we compute:
+#         # angle = (atan2(-dx, -dy) + 360) % 360
+#         angle_rad = math.atan2(-dx, -dy)
+#         angle_deg = (math.degrees(angle_rad) + 360) % 360
+#         direction = quantize_direction(angle_deg)
+
+#     print(f"Predicted coordinate: ({pred_x:.2f}, {pred_y:.2f})")
+#     if direction == "静止":
+#         print(f"Direction: {direction} (within {threshold} pixels of center)")
+#     else:
+#         print(f"Direction: {direction}")
+ # 3. Instantiate model & load weights
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+model = ViTCoordinateRegressor(model_name='timm/vit_base_patch16_224', num_outputs=2)
+model.load_state_dict(torch.load("checkpoints/vit_coordinate_regressor.pth", map_location=device))
+model.to(device)
+model.eval()
+# 1. Define transforms (same as training)
+transform = transforms.Compose([
+    transforms.Resize((224, 224)),
+    transforms.ToTensor(),
+    transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                            std=[0.229, 0.224, 0.225])
+])
+def predict(img : Image, width, height):
+
+    
+    # 2. Load image and apply transforms
+    img_tensor = transform(img).unsqueeze(0)  # shape: [1, 3, 224, 224]
+
+   
+
+    # 4. Predict (model outputs normalized coordinates)
     with torch.no_grad():
         img_tensor = img_tensor.to(device)
-        output = model(img_tensor)
+        output = model(img_tensor)  # shape: [1, 2]
         pred_x_norm, pred_y_norm = output[0].cpu().tolist()
 
-    # Convert normalized to pixel coordinates
+    # 5. Convert normalized predictions to pixel coordinates
     pred_x = pred_x_norm * width
     pred_y = pred_y_norm * height
 
-    if smooth:
-        pred_x, pred_y = smooth_coords(pred_x, pred_y)
-
-    # Optional: Move cursor
-    if move_cursor:
-        import pyautogui
-        screen_x = min(max(0, pred_x), pyautogui.size().width)
-        screen_y = min(max(0, pred_y), pyautogui.size().height)
-        pyautogui.moveTo(int(screen_x), int(screen_y))
-
-    # Compute direction
-    center_x, center_y = width / 2.0, height / 2.0
+    # 6. Compute direction relative to screen center.
+    center_x = width / 2.0
+    center_y = width / 2.0
+    
+    # Compute vector from center to prediction.
     dx = pred_x - center_x
     dy = pred_y - center_y
-    distance = math.sqrt(dx**2 + dy**2)
-    threshold = 100.0
-
-    if distance < threshold:
-        direction = "Rest"
-    else:
-        angle_rad = math.atan2(-dx, -dy)
-        angle_deg = (math.degrees(angle_rad) + 360) % 360
-        direction = quantize_direction(angle_deg)
-
-    print(f"Predicted coordinate: ({pred_x:.2f}, {pred_y:.2f})")
-    if direction == "Rest":
-        print(f"Direction: {direction} (within {threshold}px of center)")
-    else:
-        print(f"Direction: {direction}")
-
-    return {
-        "pred_x": pred_x,
-        "pred_y": pred_y,
-        "direction": direction,
-        "distance_from_center": distance
-    }
-
-def fit_calibration_model(calibration_data):
-    """
-    Fits a calibration regression model from predicted → true coordinates.
-
-    Args:
-        calibration_data (List[Dict]): Output from calibrate_sample with keys:
-            'pred_x', 'pred_y', 'true_x', 'true_y'
-
-    Returns:
-        sklearn.linear_model.LinearRegression: 2D regression model
-    """
-    X = np.array([[d["pred_x"], d["pred_y"]] for d in calibration_data])
-    Y = np.array([[d["true_x"], d["true_y"]] for d in calibration_data])
-    model = LinearRegression()
-    model.fit(X, Y)
-    return model
-
-def run_inference_with_calibration(img: Image.Image, width: float, height: float,
-                                   calibration_model, smooth=False, move_cursor=False):
-    """
-    Performs gaze prediction and adjusts using a fitted calibration model.
-
-    Args:
-        img: input image (PIL)
-        width, height: screen resolution
-        calibration_model: sklearn model from fit_calibration_model
-        smooth: whether to apply smoothing
-        move_cursor: move mouse (optional)
-
-    Returns:
-        dict: predicted/calibrated gaze coordinates, direction, etc.
-    """
-    raw = run_inference(img, width, height, smooth=smooth, move_cursor=False)
-    pred_x = raw["pred_x"]
-    pred_y = raw["pred_y"]
-
-    # Apply calibration model
-    calibrated = calibration_model.predict([[pred_x, pred_y]])[0]
-    calib_x, calib_y = calibrated.tolist()
-
-    if move_cursor:
-        import pyautogui
-        screen_x = min(max(0, calib_x), pyautogui.size().width)
-        screen_y = min(max(0, calib_y), pyautogui.size().height)
-        pyautogui.moveTo(int(screen_x), int(screen_y))
-
-    center_x, center_y = width / 2.0, height / 2.0
-    dx = calib_x - center_x
-    dy = calib_y - center_y
     distance = math.sqrt(dx**2 + dy**2)
     threshold = 100.0
 
