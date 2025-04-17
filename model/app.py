@@ -20,7 +20,11 @@ app.add_middleware(
 @app.post("/predict")
 async def predict(file: UploadFile = File(...),screen_width: int = Form(...), screen_height: int = Form(...),):
     image = Image.open(BytesIO(await file.read()))
-    pred_x, pred_y, direction = inference.predict(image, screen_width, screen_height)
+    result = inference.run_inference_with_calibration(image, screen_width, screen_height)
+    pred_x = result["pred_x"]
+    pred_y = result["pred_y"]
+    direction = result["direction"]
+    print(pred_x)
     return {"x" : pred_x, "y" : pred_y, "direction" : direction}
 
 @app.post("/save_click")

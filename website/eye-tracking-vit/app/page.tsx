@@ -45,11 +45,6 @@ export default function Page() {
       console.log(x, y, direction)
 
     }
-      // if (cursorRef.current) {
-      //   cursorRef.current.style.left = `${x}px` // Fix this so it moves gradually
-      //   cursorRef.current.style.top = `${y}px`
-      // }
-      // console.log(x, y, direction)
     const animateCursor = () => {
     if (cursorRef.current) {
       // LERP = linear interpolation
@@ -58,8 +53,8 @@ export default function Page() {
       currentPos.current.x = lerp(currentPos.current.x, targetPos.current.x, 0.05)
       currentPos.current.y = lerp(currentPos.current.y, targetPos.current.y, 0.05)
 
-      cursorRef.current.style.left = '0px'//`${currentPos.current.x}px`
-      cursorRef.current.style.top = '0px' //`${currentPos.current.y}px`
+      cursorRef.current.style.left = `${currentPos.current.x}px`
+      cursorRef.current.style.top = `${currentPos.current.y}px`
       }
 
     requestAnimationFrame(animateCursor)

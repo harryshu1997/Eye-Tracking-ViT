@@ -1,10 +1,12 @@
 "use client"
 import { useEffect, useRef, useState } from "react"
+import { useRouter } from "next/navigation"
 
 export default function GazeGamePage() {
   const videoRef = useRef<HTMLVideoElement>(null)
   const [gridPoints, setGridPoints] = useState<{ x: number, y: number }[]>([])
   const [index, setIndex] = useState(0)
+  const router = useRouter()
   const [status, setStatus] = useState("Waiting...")
 
   useEffect(() => {
@@ -54,16 +56,21 @@ export default function GazeGamePage() {
     })
 
     setIndex((i) => i + 1)
-    setStatus(index + 1 >= gridPoints.length ? "Done!" : `Click dot ${index + 1}`)
+    if (index + 1 >= gridPoints.length) {
+        setStatus("Done!")
+        router.push("/")
+      } else {
+        setStatus(`Click dot ${index + 1}`)
+      }
   }
 
   const currentDot = gridPoints[index] || null
 
   return (
-    <div onClick={captureAndSend} className="w-full h-screen bg-black relative">
+    <div className="w-full h-screen bg-black relative">
       <video ref={videoRef} autoPlay className="hidden" />
       {currentDot && (
-        <div
+        <div 
           style={{
             position: "absolute",
             left: `${currentDot.x - 15}px`,
@@ -74,6 +81,7 @@ export default function GazeGamePage() {
             borderRadius: "50%",
             zIndex: 10,
           }}
+          onClick={captureAndSend}
         />
       )}
       <p className="absolute top-4 left-4 text-white">{status}</p>
