@@ -24,7 +24,6 @@ async def predict(file: UploadFile = File(...),screen_width: int = Form(...), sc
     pred_x = result["pred_x"]
     pred_y = result["pred_y"]
     direction = result["direction"]
-    print(pred_x)
     return {"x" : pred_x, "y" : pred_y, "direction" : direction}
 
 @app.post("/save_click")
