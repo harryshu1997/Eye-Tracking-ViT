@@ -10,9 +10,21 @@ import time
 from sklearn.linear_model import LinearRegression
 import numpy as np
 
-
-
 calib_model = None
+# Instantiate model & load weights
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+model = ViTCoordinateRegressor(model_name='timm/vit_base_patch16_224', num_outputs=2)
+model.load_state_dict(torch.load("checkpoints/vit_coordinate_regressor.pth", map_location=device))
+model.to(device)
+model.eval()
+
+# Define transforms (same as training)
+transform = transforms.Compose([
+    transforms.Resize((224, 224)),
+    transforms.ToTensor(),
+    transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                            std=[0.229, 0.224, 0.225])
+])
 # 16 compass directions in English
 DIRECTION_NAMES = [
     "North", "North-Northeast", "Northeast", "East-Northeast",
@@ -66,7 +78,7 @@ def fit_calibration_model(calibration_data):
     return model
 
 def run_inference_with_calibration(img: Image.Image, width: float, height: float,
-                                smooth=False, move_cursor=False):
+                             smooth=False, move_cursor=False):
 
     """
     Performs gaze prediction and adjusts using a fitted calibration model.
@@ -86,6 +98,9 @@ def run_inference_with_calibration(img: Image.Image, width: float, height: float
     pred_y = raw["pred_y"]
 
     # Apply calibration model
+    if calib_model is None:
+        raise ValueError("Calibration model has not been initialized. Call /calibrate first.")
+
     calibrated = calib_model.predict([[pred_x, pred_y]])[0]
     calib_x, calib_y = calibrated.tolist()
 
@@ -221,35 +236,30 @@ calib_model = fit_calibration_model(samples)
 output = run_inference_with_calibration(img, 1920, 1080, calib_model, smooth=True)
 
 '''
-# Instantiate model & load weights
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-model = ViTCoordinateRegressor(model_name='timm/vit_base_patch16_224', num_outputs=2)
-model.load_state_dict(torch.load("checkpoints/vit_coordinate_regressor.pth", map_location=device))
-model.to(device)
-model.eval()
 
-# Define transforms (same as training)
-transform = transforms.Compose([
-    transforms.Resize((224, 224)),
-    transforms.ToTensor(),
-    transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                            std=[0.229, 0.224, 0.225])
-])
 
-samples = []
-folder_path = "temp_data"
-json_path = os.path.join(folder_path, "capture_data.json")
-with open(json_path, "r") as f:
-    data = json.load(f)
-screen_width = data["width"]
-screen_height = data["height"]
-image_paths = [os.path.join(folder_path, item["filename"]) for item in data["image_data"]]
-true_coords = [(item["x"], item["y"]) for item in data["image_data"]]
-for img_path, (true_x, true_y) in zip(image_paths, true_coords):
-    img = Image.open(img_path).convert("RGB")
-    sample = calibrate_sample(img, screen_width, screen_height, true_x, true_y)
-    samples.append(sample)
-calib_model = fit_calibration_model(samples)
+def initialize_calibration_model():
+
+    """
+    Initializes the calibration model to None.
+    """
+    
+    samples = []
+    folder_path = "temp_data"
+    json_path = os.path.join(folder_path, "capture_data.json")
+    with open(json_path, "r") as f:
+        data = json.load(f)
+    screen_width = data["width"]
+    screen_height = data["height"]
+    image_paths = [os.path.join(folder_path, item["filename"]) for item in data["image_data"]]
+    true_coords = [(item["x"], item["y"]) for item in data["image_data"]]
+    for img_path, (true_x, true_y) in zip(image_paths, true_coords):
+        img = Image.open(img_path).convert("RGB")
+        sample = calibrate_sample(img, screen_width, screen_height, true_x, true_y)
+        samples.append(sample)
+    global calib_model 
+    calib_model = fit_calibration_model(samples)
+    return calib_model
 
 # def main():
 #     if len(sys.argv) < 4:

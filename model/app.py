@@ -25,7 +25,10 @@ async def predict(file: UploadFile = File(...),screen_width: int = Form(...), sc
     pred_y = result["pred_y"]
     direction = result["direction"]
     return {"x" : pred_x, "y" : pred_y, "direction" : direction}
-
+@app.post("/calibrate")
+async def calibrate():
+    inference.initialize_calibration_model()
+    return {"status": "calibration model initialized"}
 @app.post("/save_click")
 async def save_click(
     file: UploadFile = File(...),

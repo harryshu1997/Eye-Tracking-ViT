@@ -58,6 +58,10 @@ export default function GazeGamePage() {
     setIndex((i) => i + 1)
     if (index + 1 >= gridPoints.length) {
         setStatus("Done!")
+        const response = await fetch("http://localhost:8000/calibrate", {
+          method: "POST",
+        })
+        console.log("Calibration finished:", response)
         router.push("/")
       } else {
         setStatus(`Click dot ${index + 1}`)
