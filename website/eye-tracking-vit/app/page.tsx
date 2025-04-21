@@ -67,6 +67,7 @@ export default function Page() {
   return (
     <div className="flex flex-col items-center justify-center ">
       <h1 className="text-xl font-bold">Eye Tracking ViT Project</h1>
+      <h2 className="text-md">Please look around to move the dots</h2>
       <video ref={videoRef} autoPlay style={{ display: 'none' }} />
       <div
         ref={cursorRef}
