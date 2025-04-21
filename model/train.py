@@ -10,7 +10,7 @@ from model import ViTCoordinateRegressor
 
 def main():
     # 1. Define paths
-    data_dir = "/home/monsterharry/Documents/eye-tracking-vit/Eye-Tracking-ViT/data"  # path to your data folder
+    data_dir = "../data"  # path to your data folder
     json_path = os.path.join(data_dir, "capture_data.json")  # path to JSON file
 
 

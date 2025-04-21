@@ -144,9 +144,10 @@ def predict(img : Image, width, height):
         pred_x_norm, pred_y_norm = output[0].cpu().tolist()
 
     # 5. Convert normalized predictions to pixel coordinates
-    pred_x = pred_x_norm * width
-    pred_y = pred_y_norm * height
-
+    # pred_x = pred_x_norm * width
+    # pred_y = pred_y_norm * height
+    pred_x = pred_x_norm
+    pred_y = pred_y_norm
     # 6. Compute direction relative to screen center.
     center_x = width / 2.0
     center_y = width / 2.0
@@ -261,17 +262,17 @@ def initialize_calibration_model():
     calib_model = fit_calibration_model(samples)
     return calib_model
 
-# def main():
-#     if len(sys.argv) < 4:
-#         print("Usage: python inference.py <image_path> <width> <height>")
-#         sys.exit(1)
+def main():
+    if len(sys.argv) < 4:
+        print("Usage: python inference.py <image_path> <width> <height>")
+        sys.exit(1)
 
-#     image_path = sys.argv[1]
-#     normal_width = float(sys.argv[2])
-#     normal_height = float(sys.argv[3])
+    image_path = sys.argv[1]
+    normal_width = float(sys.argv[2])
+    normal_height = float(sys.argv[3])
 
-#     img = Image.open(image_path).convert("RGB")
-#     run_inference(img, normal_width, normal_height, smooth=False, move_cursor=False)
-
-# if __name__ == "__main__":
-#     main()
+    img = Image.open(image_path).convert("RGB")
+    calib_model = initialize_calibration_model()
+    print(run_inference_with_calibration(img, normal_width, normal_height))
+if __name__ == "__main__":
+    main()

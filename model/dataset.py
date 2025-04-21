@@ -51,9 +51,10 @@ class JSONCoordinateDataset(Dataset):
         if self.transform:
             image = self.transform(image)
 
-        x_norm = entry["x"] / entry["width"]
-        y_norm = entry["y"] / entry["height"]
-
+        # x_norm = entry["x"] / entry["width"]
+        # y_norm = entry["y"] / entry["height"]
+        x_norm = entry["x"] 
+        y_norm = entry["y"]
         if self.training:
             jitter = 0.02
             x_norm += random.uniform(-jitter, jitter)
