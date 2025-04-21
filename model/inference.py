@@ -9,6 +9,10 @@ from model import ViTCoordinateRegressor
 import time
 from sklearn.linear_model import LinearRegression
 import numpy as np
+import mediapipe as mp
+import cv2
+import numpy as np
+
 
 calib_model = None
 # Instantiate model & load weights
@@ -17,6 +21,43 @@ model = ViTCoordinateRegressor(model_name='timm/vit_base_patch16_224', num_outpu
 model.load_state_dict(torch.load("checkpoints/vit_coordinate_regressor.pth", map_location=device))
 model.to(device)
 model.eval()
+
+mp_face_mesh = mp.solutions.face_mesh.FaceMesh(static_image_mode=True)
+def crop_eye_region_and_adjust_coords(img_pil: Image.Image, gaze_x: float, gaze_y: float):
+    """
+    Crop the eye region and adjust the gaze coordinates accordingly.
+    Args:
+        img_pil: Original RGB image
+        gaze_x, gaze_y: Ground truth or predicted coordinates (absolute pixels)
+    Returns:
+        cropped_image: PIL Image
+        x_adj, y_adj: Adjusted gaze coordinates in cropped image (absolute pixels)
+        crop_info: (x_min, y_min, crop_width, crop_height)
+    """
+    width, height = img_pil.size
+    img_cv = cv2.cvtColor(np.array(img_pil), cv2.COLOR_RGB2BGR)
+    results = mp_face_mesh.process(img_cv)
+
+    if results.multi_face_landmarks:
+        landmarks = results.multi_face_landmarks[0].landmark
+        eye_indices = list(range(33, 134))
+        eye_x = [landmarks[i].x * width for i in eye_indices]
+        eye_y = [landmarks[i].y * height for i in eye_indices]
+
+        margin = 20
+        x_min = max(int(min(eye_x)) - margin, 0)
+        y_min = max(int(min(eye_y)) - margin, 0)
+        x_max = min(int(max(eye_x)) + margin, width)
+        y_max = min(int(max(eye_y)) + margin, height)
+
+        cropped_image = img_pil.crop((x_min, y_min, x_max, y_max))
+        x_adj = gaze_x - x_min
+        y_adj = gaze_y - y_min
+
+        return cropped_image, x_adj, y_adj, (x_min, y_min, x_max - x_min, y_max - y_min)
+
+    # fallback: return full image
+    return img_pil, gaze_x, gaze_y, (0, 0, width, height)
 
 # Define transforms (same as training)
 transform = transforms.Compose([
@@ -93,7 +134,7 @@ def run_inference_with_calibration(img: Image.Image, width: float, height: float
         dict: predicted/calibrated gaze coordinates, direction, etc.
     """
 
-    raw = predict(img, width, height)
+    raw = predict_with_crop(img, width, height)
     pred_x = raw["pred_x"]
     pred_y = raw["pred_y"]
 
@@ -173,6 +214,44 @@ def predict(img : Image, width, height):
         "distance_from_center": distance
     }
 
+def predict_with_crop(img: Image.Image, screen_width, screen_height):
+    # Use dummy gaze point for cropping (we're predicting, so no label yet)
+    cropped_img, _, _, (x_offset, y_offset, crop_w, crop_h) = crop_eye_region_and_adjust_coords(
+        img, screen_width / 2, screen_height / 2
+    )
+
+    img_tensor = transform(cropped_img).unsqueeze(0)
+
+    with torch.no_grad():
+        img_tensor = img_tensor.to(device)
+        output = model(img_tensor)
+        pred_x, pred_y = output[0].cpu().tolist()
+
+    # Prediction is in crop coordinate space → convert back to original screen space
+    global_x = pred_x + x_offset
+    global_y = pred_y + y_offset
+
+    center_x = screen_width / 2.0
+    center_y = screen_height / 2.0
+    dx = global_x - center_x
+    dy = global_y - center_y
+    distance = math.sqrt(dx**2 + dy**2)
+
+    threshold = 100.0
+    if distance < threshold:
+        direction = "Rest"
+    else:
+        angle_rad = math.atan2(-dx, -dy)
+        angle_deg = (math.degrees(angle_rad) + 360) % 360
+        direction = quantize_direction(angle_deg)
+
+    return {
+        "pred_x": global_x,
+        "pred_y": global_y,
+        "direction": direction,
+        "distance_from_center": distance
+    }
+
 def calibrate_sample(img: Image.Image, width: float, height: float,
                      true_x: float, true_y: float, smooth=False) -> dict:
     """
@@ -187,7 +266,7 @@ def calibrate_sample(img: Image.Image, width: float, height: float,
     Returns:
         dict with model prediction, true values, and error metrics.
     """
-    result = predict(img, width, height)
+    result = predict_with_crop(img, width, height)
     
     pred_x = result["pred_x"]
     pred_y = result["pred_y"]

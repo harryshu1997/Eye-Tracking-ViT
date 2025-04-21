@@ -21,7 +21,8 @@ def main():
         transforms.ToTensor(),
         # ImageNet normalization
         transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                             std=[0.229, 0.224, 0.225])
+                             std=[0.229, 0.224, 0.225]),
+        transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2)
     ])
 
     # 3. Create dataset
@@ -42,8 +43,8 @@ def main():
     val_dataset.dataset.training = False
 
     # 5. Create dataloaders
-    train_loader = DataLoader(train_dataset, batch_size=16, shuffle=True, num_workers=4)
-    val_loader = DataLoader(val_dataset, batch_size=16, shuffle=False, num_workers=4)
+    train_loader = DataLoader(train_dataset, batch_size=16, shuffle=True, num_workers=0)
+    val_loader = DataLoader(val_dataset, batch_size=16, shuffle=False, num_workers=0)
 
     # 6. Instantiate model
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
