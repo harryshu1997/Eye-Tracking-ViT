@@ -18,7 +18,7 @@ export default function GazeGamePage() {
 
     const marginX = 50
     const marginY = 50
-    const rows = 7, cols = 7
+    const rows = 4, cols = 4
     const points = []
     for (let row = 0; row < rows; row++) {
       for (let col = 0; col < cols; col++) {

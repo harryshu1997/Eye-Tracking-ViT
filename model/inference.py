@@ -158,12 +158,12 @@ def run_inference_with_calibration(img: Image.Image, width: float, height: float
 
     # Define threshold for "Rest" (if within threshold pixels of center, output "Rest")
     threshold = 100.0
-    if distance < threshold:
-        direction = "Rest"
-    else:
-        angle_rad = math.atan2(-dx, -dy)
-        angle_deg = (math.degrees(angle_rad) + 360) % 360
-        direction = quantize_direction(angle_deg)
+    #if distance < threshold:
+    #direction = "Rest"
+#else:
+    angle_rad = math.atan2(-dx, -dy)
+    angle_deg = (math.degrees(angle_rad) + 360) % 360
+    direction = quantize_direction(angle_deg)
     print(f"Predicted coordinate: ({pred_x:.2f}, {pred_y:.2f})")
     print(f"[CALIBRATED] Coordinate: ({calib_x:.2f}, {calib_y:.2f}), Direction: {direction}")
     return {
@@ -244,6 +244,8 @@ def predict_with_crop(img: Image.Image, screen_width, screen_height):
         angle_rad = math.atan2(-dx, -dy)
         angle_deg = (math.degrees(angle_rad) + 360) % 360
         direction = quantize_direction(angle_deg)
+
+    print(f"Predicted coordinate: ({pred_x:.2f}, {pred_y:.2f})")
 
     return {
         "pred_x": global_x,
@@ -351,7 +353,8 @@ def main():
     normal_height = float(sys.argv[3])
 
     img = Image.open(image_path).convert("RGB")
-    calib_model = initialize_calibration_model()
-    print(run_inference_with_calibration(img, normal_width, normal_height))
+    #calib_model = initialize_calibration_model()
+    #print(run_inference_with_calibration(img, normal_width, normal_height))
+    print(predict_with_crop(img, normal_width, normal_height))
 if __name__ == "__main__":
     main()

@@ -21,6 +21,7 @@ app.add_middleware(
 async def predict(file: UploadFile = File(...),screen_width: int = Form(...), screen_height: int = Form(...),):
     image = Image.open(BytesIO(await file.read()))
     result = inference.run_inference_with_calibration(image, screen_width, screen_height)
+    #result = inference.predict_with_crop(image, screen_width, screen_height)
     pred_x = result["pred_x"]
     pred_y = result["pred_y"]
     direction = result["direction"]
