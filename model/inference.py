@@ -62,17 +62,35 @@ def classify_region(x, y, W, H):
     return region.strip(), dist
 
 def draw_arrow(img: Image.Image, ang_xy, save=None, show=False):
-    w,h = img.size
-    cx,cy = w/2, h/2
-    scale = min(w,h)/4
-    ex,ey = cx + ang_xy[0]*scale, cy + ang_xy[1]*scale
-    fig,ax = plt.subplots(figsize=(8,6))
-    ax.imshow(img); ax.axis('off')
-    ax.plot([cx,ex],[cy,ey],'r-',lw=2)
-    ax.plot(cx,cy,'bo',ms=8); ax.plot(ex,ey,'ro',ms=10)
-    ax.set_title(f'angle ({ang_xy[0]:+.2f},{ang_xy[1]:+.2f})')
-    if save: fig.savefig(save, bbox_inches='tight'); print(f'✓ saved {save}')
-    if show: plt.show()
+    w, h      = img.size
+    cx, cy    = w / 2, h / 2
+    scale     = min(w, h) / 4
+    ex, ey    = cx + ang_xy[0] * scale, cy + ang_xy[1] * scale
+
+    fig, ax = plt.subplots(figsize=(8, 6))
+    ax.imshow(img)
+    ax.axis('off')
+
+    # ─── draw a single arrow from centre to end-point ──────────────────
+    ax.annotate(
+        '',                     # no text
+        xy=(ex, ey),            # arrow tip
+        xytext=(cx, cy),        # arrow tail
+        arrowprops=dict(
+            arrowstyle='->',    # normal arrow-head
+            linewidth=3,
+            color='red',
+            shrinkA=0, shrinkB=0   # don’t shorten at either end
+        )
+    )
+
+    ax.set_title(f'angle ({ang_xy[0]:+.2f}, {ang_xy[1]:+.2f})')
+
+    if save:
+        fig.savefig(save, bbox_inches='tight')
+        print(f'✓ saved {save}')
+    # if show:
+    #     plt.show()
     plt.close(fig)
 
 def auto_crop_face(pil_img, margin=0.25):
