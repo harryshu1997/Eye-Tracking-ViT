@@ -20,16 +20,17 @@ app.add_middleware(
 @app.post("/predict")
 async def predict(file: UploadFile = File(...),screen_width: int = Form(...), screen_height: int = Form(...),):
     image = Image.open(BytesIO(await file.read()))
-    result = inference.run_inference_with_calibration(image, screen_width, screen_height)
+    result = inference.predict_gaze(image, screen_width, screen_height)
     #result = inference.predict_with_crop(image, screen_width, screen_height)
-    pred_x = result["pred_x"]
-    pred_y = result["pred_y"]
+    pred_x = result["screen_x"]
+    pred_y = result["screen_y"]
     direction = result["direction"]
-    return {"x" : pred_x, "y" : pred_y, "direction" : direction}
-@app.post("/calibrate")
-async def calibrate():
-    inference.initialize_calibration_model()
-    return {"status": "calibration model initialized"}
+    distance_from_center = result["distance_from_center"]
+    normalized_x = result["normalized_x"]
+    normalized_y = result["normalized_y"]
+    return {"x" : pred_x, "y" : pred_y, "direction" : direction, 
+            "distance_from_center" : distance_from_center}
+
 @app.post("/save_click")
 async def save_click(
     file: UploadFile = File(...),

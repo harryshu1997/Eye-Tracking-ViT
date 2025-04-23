@@ -8,7 +8,36 @@ from torchvision import transforms
 from model import ViTGazePredictor
 import argparse
 
-def predict_gaze(model, image, device, transform):
+# Load the ViT model
+model = ViTGazePredictor(model_name='vit_base_patch16_224', pretrained=False)
+
+# Set device
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(f"Using device: {device}")
+
+# Define image transforms (same as in training)
+transform = transforms.Compose([
+    transforms.Resize((224, 224)),
+    transforms.ToTensor(),
+    transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                        std=[0.229, 0.224, 0.225])
+])
+
+# Load the saved model weights
+checkpoint = torch.load("checkpoints/vit_gaze_predictor_final.pth", map_location=device)
+
+if 'model_state_dict' in checkpoint:
+    # If saved with full checkpoint
+    model.load_state_dict(checkpoint['model_state_dict'])
+else:
+    # If saved with just state_dict
+    model.load_state_dict(checkpoint)
+model.to(device)
+model.eval()
+
+#def predict_gaze(model, image, device, transform):
+def predict_gaze(image, width, height):
+
     """
     Run inference on a single image
     
@@ -29,8 +58,26 @@ def predict_gaze(model, image, device, transform):
         img_tensor = img_tensor.to(device)
         output = model(img_tensor)  # shape: [1, 2]
         pred_x, pred_y = output[0].cpu().numpy()
-        
-    return pred_x, pred_y
+    screen_x = pred_x * width
+    screen_y = pred_y * height
+    direction_info = calculate_screen_direction(screen_x, screen_y, width, height)
+
+    print("\nGaze Prediction Results:")
+    print(f"Normalized coordinates: ({pred_x:.4f}, {pred_y:.4f})")
+    print(f"Screen coordinates: ({screen_x:.1f}, {screen_y:.1f})")
+    print(f"Direction: {direction_info['direction']}")
+    print(f"Distance from center: {direction_info['distance_from_center']:.1f} pixels")
+    # Create results dictionary
+    results = {
+        "normalized_x": float(pred_x),
+        "normalized_y": float(pred_y),
+        "screen_x": float(screen_x),
+        "screen_y": float(screen_y),
+        "direction": direction_info["direction"],
+        "distance_from_center": float(direction_info["distance_from_center"])
+    }
+    
+    return results
 
 def calculate_screen_direction(x, y, screen_width, screen_height):
     """
