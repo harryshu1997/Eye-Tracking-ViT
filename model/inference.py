@@ -1,357 +1,196 @@
+import os
 import torch
 import sys
 import math
-import json
-import os
+import numpy as np
 from PIL import Image
 from torchvision import transforms
-from model import ViTCoordinateRegressor
-import time
-from sklearn.linear_model import LinearRegression
-import numpy as np
-import mediapipe as mp
-import cv2
-import numpy as np
+from model import ViTGazePredictor
+import argparse
 
-
-calib_model = None
-# Instantiate model & load weights
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-model = ViTCoordinateRegressor(model_name='timm/vit_base_patch16_224', num_outputs=2)
-model.load_state_dict(torch.load("checkpoints/vit_coordinate_regressor.pth", map_location=device))
-model.to(device)
-model.eval()
-
-mp_face_mesh = mp.solutions.face_mesh.FaceMesh(static_image_mode=True)
-def crop_eye_region_and_adjust_coords(img_pil: Image.Image, gaze_x: float, gaze_y: float):
+def predict_gaze(model, image, device, transform):
     """
-    Crop the eye region and adjust the gaze coordinates accordingly.
+    Run inference on a single image
+    
     Args:
-        img_pil: Original RGB image
-        gaze_x, gaze_y: Ground truth or predicted coordinates (absolute pixels)
+        model: The trained ViT model
+        image: PIL Image
+        device: torch device (cuda or cpu)
+        transform: torchvision transforms
+        
     Returns:
-        cropped_image: PIL Image
-        x_adj, y_adj: Adjusted gaze coordinates in cropped image (absolute pixels)
-        crop_info: (x_min, y_min, crop_width, crop_height)
+        normalized x, y gaze coordinates
     """
-    width, height = img_pil.size
-    img_cv = cv2.cvtColor(np.array(img_pil), cv2.COLOR_RGB2BGR)
-    results = mp_face_mesh.process(img_cv)
+    # Convert image to tensor and normalize
+    img_tensor = transform(image).unsqueeze(0)  # Add batch dimension
+    
+    # Run inference
+    with torch.no_grad():
+        img_tensor = img_tensor.to(device)
+        output = model(img_tensor)  # shape: [1, 2]
+        pred_x, pred_y = output[0].cpu().numpy()
+        
+    return pred_x, pred_y
 
-    if results.multi_face_landmarks:
-        landmarks = results.multi_face_landmarks[0].landmark
-        eye_indices = list(range(33, 134))
-        eye_x = [landmarks[i].x * width for i in eye_indices]
-        eye_y = [landmarks[i].y * height for i in eye_indices]
+def calculate_screen_direction(x, y, screen_width, screen_height):
+    """
+    Calculate the gaze direction relative to the screen (e.g., "top left", "bottom right")
+    
+    Args:
+        x, y: Predicted gaze coordinates
+        screen_width, screen_height: Screen dimensions
+        
+    Returns:
+        dict with screen-relative direction and distance from center
+    """
+    # Calculate direction relative to center
+    center_x, center_y = screen_width / 2.0, screen_height / 2.0
+    
+    # Vector from center to prediction
+    dx = x - center_x
+    dy = y - center_y
+    distance = math.sqrt(dx**2 + dy**2)
+    threshold = 100.0  # Threshold for "center" classification
+    
+    # Determine vertical position (top/center/bottom)
+    if abs(dy) < threshold:
+        vertical = "center"
+    elif dy < 0:
+        vertical = "top"
+    else:
+        vertical = "bottom"
+    
+    # Determine horizontal position (left/center/right)
+    if abs(dx) < threshold:
+        horizontal = "center"
+    elif dx < 0:
+        horizontal = "left"
+    else:
+        horizontal = "right"
+    
+    # Special case for center
+    if vertical == "center" and horizontal == "center":
+        direction = "center of screen"
+    else:
+        direction = f"{vertical} {horizontal} of screen"
+    
+    # Calculate distance from bounds for off-screen coordinates
+    off_screen = ""
+    if x < 0:
+        off_screen = f" ({abs(x):.0f} pixels left of screen edge)"
+    elif x > screen_width:
+        off_screen = f" ({abs(x - screen_width):.0f} pixels right of screen edge)" 
+    elif y < 0:
+        off_screen = f" ({abs(y):.0f} pixels above screen edge)"
+    elif y > screen_height:
+        off_screen = f" ({abs(y - screen_height):.0f} pixels below screen edge)"
+    
+    # Add off-screen indication if applicable
+    if off_screen:
+        direction += off_screen
+    
+    return {
+        "direction": direction,
+        "distance_from_center": distance
+    }
 
-        margin = 20
-        x_min = max(int(min(eye_x)) - margin, 0)
-        y_min = max(int(min(eye_y)) - margin, 0)
-        x_max = min(int(max(eye_x)) + margin, width)
-        y_max = min(int(max(eye_y)) + margin, height)
-
-        cropped_image = img_pil.crop((x_min, y_min, x_max, y_max))
-        x_adj = gaze_x - x_min
-        y_adj = gaze_y - y_min
-
-        return cropped_image, x_adj, y_adj, (x_min, y_min, x_max - x_min, y_max - y_min)
-
-    # fallback: return full image
-    return img_pil, gaze_x, gaze_y, (0, 0, width, height)
-
-# Define transforms (same as training)
-transform = transforms.Compose([
-    transforms.Resize((224, 224)),
-    transforms.ToTensor(),
-    transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                            std=[0.229, 0.224, 0.225])
-])
-# 16 compass directions in English
-DIRECTION_NAMES = [
-    "North", "North-Northeast", "Northeast", "East-Northeast",
-    "East", "East-Southeast", "Southeast", "South-Southeast",
-    "South", "South-Southwest", "Southwest", "West-Southwest",
-    "West", "West-Northwest", "Northwest", "North-Northwest"
-]
-
-def quantize_direction(angle_deg):
-    bin_width = 360 / 16
-    bin_index = int(angle_deg // bin_width) % 16
-    return DIRECTION_NAMES[bin_index]
-
-# Optional smoothing state
-# prev_x, prev_y = None, None
-# def smooth_coords(x, y, alpha=0.2):
-#     global prev_x, prev_y
-#     if prev_x is None:
-#         prev_x, prev_y = x, y
-#     else:
-#         prev_x = alpha * x + (1 - alpha) * prev_x
-#         prev_y = alpha * y + (1 - alpha) * prev_y
-#     return prev_x, prev_y
-
-def run_inference(img: Image.Image, width: float, height: float, smooth=False, move_cursor=False):
+def main():
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description='Gaze Direction Prediction')
+    parser.add_argument('--image', type=str, required=True, help='Path to input image')
+    parser.add_argument('--model', type=str, default='checkpoints/vit_gaze_predictor_best.pth', 
+                      help='Path to trained model')
+    parser.add_argument('--width', type=float, default=1470, help='Screen width')
+    parser.add_argument('--height', type=float, default=753, help='Screen height')
+    args = parser.parse_args()
+    
+    # Check if image exists
+    if not os.path.exists(args.image):
+        print(f"Error: Image {args.image} not found")
+        return
+    
+    # Check if model exists
+    if not os.path.exists(args.model):
+        print(f"Error: Model {args.model} not found")
+        return
+    
+    # Set device
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Using device: {device}")
+    
+    # Define image transforms (same as in training)
     transform = transforms.Compose([
         transforms.Resize((224, 224)),
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                             std=[0.229, 0.224, 0.225])
+                            std=[0.229, 0.224, 0.225])
     ])
-    img_tensor = transform(img).unsqueeze(0)
-
-
-
-def fit_calibration_model(calibration_data):
-
-    """
-    Fits a calibration regression model from predicted → true coordinates.
-
-    Args:
-        calibration_data (List[Dict]): Output from calibrate_sample with keys:
-            'pred_x', 'pred_y', 'true_x', 'true_y'
-    Returns:
-        sklearn.linear_model.LinearRegression: 2D regression model
-    """
-    X = np.array([[d["pred_x"], d["pred_y"]] for d in calibration_data])
-    Y = np.array([[d["true_x"], d["true_y"]] for d in calibration_data])
-    model = LinearRegression()
-    model.fit(X, Y)
-    return model
-
-def run_inference_with_calibration(img: Image.Image, width: float, height: float,
-                             smooth=False, move_cursor=False):
-
-    """
-    Performs gaze prediction and adjusts using a fitted calibration model.
-
-    Args:
-        img: input image (PIL)
-        width, height: screen resolution
-        calibration_model: sklearn model from fit_calibration_model
-        smooth: whether to apply smoothing
-        move_cursor: move mouse (optional)
-    Returns:
-        dict: predicted/calibrated gaze coordinates, direction, etc.
-    """
-
-    raw = predict_with_crop(img, width, height)
-    pred_x = raw["pred_x"]
-    pred_y = raw["pred_y"]
-
-    # Apply calibration model
-    if calib_model is None:
-        raise ValueError("Calibration model has not been initialized. Call /calibrate first.")
-
-    calibrated = calib_model.predict([[pred_x, pred_y]])[0]
-    calib_x, calib_y = calibrated.tolist()
-
-    # if move_cursor:
-    #     import pyautogui
-    #     screen_x = min(max(0, calib_x), pyautogui.size().width)
-    #     screen_y = min(max(0, calib_y), pyautogui.size().height)
-    #     pyautogui.moveTo(int(screen_x), int(screen_y))
-
-    center_x, center_y = width / 2.0, height / 2.0
-    dx = calib_x - center_x
-    dy = calib_y - center_y
-    distance = math.sqrt(dx**2 + dy**2)
-
-    # Define threshold for "Rest" (if within threshold pixels of center, output "Rest")
-    threshold = 100.0
-    if distance < threshold:
-        direction = "Rest"
-    else:
-        angle_rad = math.atan2(-dx, -dy)
-        angle_deg = (math.degrees(angle_rad) + 360) % 360
-        direction = quantize_direction(angle_deg)
-    print(f"Predicted coordinate: ({pred_x:.2f}, {pred_y:.2f})")
-    print(f"[CALIBRATED] Coordinate: ({calib_x:.2f}, {calib_y:.2f}), Direction: {direction}")
-    return {
-        "pred_x": calib_x,
-        "pred_y": calib_y,
-        "direction": direction,
-        "distance_from_center": distance
-    }
-
-def predict(img : Image, width, height):
-
-    # 2. Load image and apply transforms
-    img_tensor = transform(img).unsqueeze(0)  # shape: [1, 3, 224, 224]
-
-    # 4. Predict (model outputs normalized coordinates)
-    with torch.no_grad():
-        img_tensor = img_tensor.to(device)
-        output = model(img_tensor)  # shape: [1, 2]
-        pred_x_norm, pred_y_norm = output[0].cpu().tolist()
-
-    # 5. Convert normalized predictions to pixel coordinates
-    # pred_x = pred_x_norm * width
-    # pred_y = pred_y_norm * height
-    pred_x = pred_x_norm
-    pred_y = pred_y_norm
-    # 6. Compute direction relative to screen center.
-    center_x = width / 2.0
-    center_y = width / 2.0
     
-    # Compute vector from center to prediction.
-    dx = pred_x - center_x
-    dy = pred_y - center_y
-    distance = math.sqrt(dx**2 + dy**2)
-    threshold = 100.0
-
-    if distance < threshold:
-        direction = "Rest"
-    else:
-        angle_rad = math.atan2(-dx, -dy)
-        angle_deg = (math.degrees(angle_rad) + 360) % 360
-        direction = quantize_direction(angle_deg)
-
-    #print(f"[CALIBRATED] Coordinate: ({calib_x:.2f}, {calib_y:.2f}), Direction: {direction}")
-    return {
-        "pred_x": pred_x,
-        "pred_y": pred_y,
-        "direction": direction,
-        "distance_from_center": distance
-    }
-
-def predict_with_crop(img: Image.Image, screen_width, screen_height):
-    # Use dummy gaze point for cropping (we're predicting, so no label yet)
-    cropped_img, _, _, (x_offset, y_offset, crop_w, crop_h) = crop_eye_region_and_adjust_coords(
-        img, screen_width / 2, screen_height / 2
-    )
-
-    img_tensor = transform(cropped_img).unsqueeze(0)
-
-    with torch.no_grad():
-        img_tensor = img_tensor.to(device)
-        output = model(img_tensor)
-        pred_x, pred_y = output[0].cpu().tolist()
-
-    # Prediction is in crop coordinate space → convert back to original screen space
-    global_x = pred_x + x_offset
-    global_y = pred_y + y_offset
-
-    center_x = screen_width / 2.0
-    center_y = screen_height / 2.0
-    dx = global_x - center_x
-    dy = global_y - center_y
-    distance = math.sqrt(dx**2 + dy**2)
-
-    threshold = 100.0
-    if distance < threshold:
-        direction = "Rest"
-    else:
-        angle_rad = math.atan2(-dx, -dy)
-        angle_deg = (math.degrees(angle_rad) + 360) % 360
-        direction = quantize_direction(angle_deg)
-
-    return {
-        "pred_x": global_x,
-        "pred_y": global_y,
-        "direction": direction,
-        "distance_from_center": distance
-    }
-
-def calibrate_sample(img: Image.Image, width: float, height: float,
-                     true_x: float, true_y: float, smooth=False) -> dict:
-    """
-    Takes a calibration image and known screen location, returns model prediction + error.
-    
-    Args:
-        img: PIL image of user's face.
-        width, height: screen resolution in pixels.
-        true_x, true_y: the actual gaze target location (in pixels).
-        smooth: whether to apply smoothing (optional).
+    # Load model
+    try:
+        # Initialize model
+        model = ViTGazePredictor(model_name='vit_base_patch16_224', pretrained=False)
         
-    Returns:
-        dict with model prediction, true values, and error metrics.
-    """
-    result = predict_with_crop(img, width, height)
+        # Load the saved model weights
+        checkpoint = torch.load(args.model, map_location=device)
+        if 'model_state_dict' in checkpoint:
+            # If saved with full checkpoint
+            model.load_state_dict(checkpoint['model_state_dict'])
+        else:
+            # If saved with just state_dict
+            model.load_state_dict(checkpoint)
+            
+        model.to(device)
+        model.eval()
+        print("Model loaded successfully")
+    except Exception as e:
+        print(f"Error loading model: {e}")
+        return
     
-    pred_x = result["pred_x"]
-    pred_y = result["pred_y"]
-
-    # Calculate Euclidean error in pixels
-    error = math.sqrt((pred_x - true_x) ** 2 + (pred_y - true_y) ** 2)
-
-    return {
-        "timestamp": time.time(),
-        "true_x": true_x,
-        "true_y": true_y,
-        "pred_x": pred_x,
-        "pred_y": pred_y,
-        "direction": result["direction"],
-        "error": error
-    }
-
-# Assuming image is from webcam and user looked at (960, 540)
-# result = calibrate_sample(pil_image, width=1920, height=1080, true_x=960, true_y=540)
-# print(result)
-
-# Sample output:
-# {
-#     'timestamp': 1713198235.18898,
-#     'true_x': 960,
-#     'true_y': 540,
-#     'pred_x': 1003.2,
-#     'pred_y': 511.7,
-#     'direction': 'East',
-#     'error': 47.6
-# }
-
-'''
-# TODO: @Khoa please follow this, it would be more accurate
-Example of how to use calib function:
-1. on the web UI, collect some pictures along with predicted (x,y) and ground truth (x1,y1)
-samples = []
-for img_path, (true_x, true_y) in zip(image_paths, true_coords):
-    img = Image.open(img_path).convert("RGB")
-    sample = calibrate_sample(img, 1920, 1080, true_x, true_y)
-    samples.append(sample)
-
-2. fit the calibration model
-calib_model = fit_calibration_model(samples)
-
-3. use the updated inference with calibration in the web UI
-output = run_inference_with_calibration(img, 1920, 1080, calib_model, smooth=True)
-
-'''
-
-
-def initialize_calibration_model():
-
-    """
-    Initializes the calibration model to None.
-    """
+    # Load and process image
+    try:
+        image = Image.open(args.image).convert("RGB")
+        print(f"Image loaded: {args.image}, size: {image.size}")
+    except Exception as e:
+        print(f"Error loading image: {e}")
+        return
     
-    samples = []
-    folder_path = "temp_data"
-    json_path = os.path.join(folder_path, "capture_data.json")
-    with open(json_path, "r") as f:
-        data = json.load(f)
-    screen_width = data["width"]
-    screen_height = data["height"]
-    image_paths = [os.path.join(folder_path, item["filename"]) for item in data["image_data"]]
-    true_coords = [(item["x"], item["y"]) for item in data["image_data"]]
-    for img_path, (true_x, true_y) in zip(image_paths, true_coords):
-        img = Image.open(img_path).convert("RGB")
-        sample = calibrate_sample(img, screen_width, screen_height, true_x, true_y)
-        samples.append(sample)
-    global calib_model 
-    calib_model = fit_calibration_model(samples)
-    return calib_model
+    # Run inference
+    try:
+        # Get normalized predictions
+        pred_x, pred_y = predict_gaze(model, image, device, transform)
+        
+        # Convert to screen coordinates
+        screen_x = pred_x * args.width
+        screen_y = pred_y * args.height
+        
+        # Get direction
+        direction_info = calculate_screen_direction(screen_x, screen_y, args.width, args.height)
+        
+        # Print results
+        print("\nGaze Prediction Results:")
+        print(f"Normalized coordinates: ({pred_x:.4f}, {pred_y:.4f})")
+        print(f"Screen coordinates: ({screen_x:.1f}, {screen_y:.1f})")
+        print(f"Direction: {direction_info['direction']}")
+        print(f"Distance from center: {direction_info['distance_from_center']:.1f} pixels")
+        
+        # Create results dictionary
+        results = {
+            "normalized_x": float(pred_x),
+            "normalized_y": float(pred_y),
+            "screen_x": float(screen_x),
+            "screen_y": float(screen_y),
+            "direction": direction_info["direction"],
+            "distance_from_center": float(direction_info["distance_from_center"])
+        }
+        
+        return results
+        
+    except Exception as e:
+        print(f"Error during inference: {e}")
+        import traceback
+        traceback.print_exc()
+        return
 
-def main():
-    if len(sys.argv) < 4:
-        print("Usage: python inference.py <image_path> <width> <height>")
-        sys.exit(1)
-
-    image_path = sys.argv[1]
-    normal_width = float(sys.argv[2])
-    normal_height = float(sys.argv[3])
-
-    img = Image.open(image_path).convert("RGB")
-    calib_model = initialize_calibration_model()
-    print(run_inference_with_calibration(img, normal_width, normal_height))
 if __name__ == "__main__":
     main()
