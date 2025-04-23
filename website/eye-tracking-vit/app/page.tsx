@@ -60,7 +60,7 @@ export default function Page() {
     requestAnimationFrame(animateCursor)
     }
     requestAnimationFrame(animateCursor)
-    const interval = setInterval(sendFrame, 1000) 
+    const interval = setInterval(sendFrame, 200) 
     return () => clearInterval(interval)
   }, []);
 
