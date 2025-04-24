@@ -15,7 +15,7 @@ from model   import ViTGazePredictor      # ViT regressor
 DATA_DIR    = "/home/monsterharry/Documents/eye-tracking-vit/Eye-Tracking-ViT/datasets/MPIIFaceGaze_normalizad"
 SAMPLES_PP  = None       # None = all 3000
 BATCH_SIZE  = 4
-NUM_EPOCHS  = 3
+NUM_EPOCHS  = 20
 USE_PIXELS  = True     # leave False unless you really want pixel targets
 SCREEN_W, SCREEN_H = 1440, 900
 SEED        = 42

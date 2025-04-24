@@ -184,7 +184,7 @@ print("✓ model backbone frozen, gaze_head unfrozen for fine-tuning")
 opt   = optim.AdamW(model.gaze_head.parameters(), lr=3e-4)
 lossf = nn.MSELoss()
 
-EPOCHS = 12
+EPOCHS = 100
 model.train()
 for epoch in range(1, EPOCHS+1):
     running = 0.0

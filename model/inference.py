@@ -15,6 +15,8 @@ DEF_WIDTH, DEF_HEIGHT = 1512, 950            # edit if needed
 '''
 
 python inference.py --show --auto-crop --checkpoint checkpoints/vit_gaze_personal.pth --image '/home/monsterharry/Documents/eye-tracking-vit/Eye-Tracking-ViT/data/zhihao_shu/4/image10.jpg' 
+python inference.py --show --auto-crop --checkpoint checkpoints/vit_gaze_best.pth --image '/home/monsterharry/Documents/eye-tracking-vit/Eye-Tracking-ViT/data/zhihao_shu/4/image10.jpg' 
+
 '''
 # ---------------------------------------------------------------------------#
 #  ─── utilities ──────────────────────────────────────────────────────────── #
@@ -27,70 +29,76 @@ def angle_to_pixel(ang_xy, W, H):
 
 def classify_region(x, y, W, H):
     """
-    Return a human-readable region label and distance from centre.
-
-    ┌──────────┬──────────┬──────────┬──────────┬──────────┐
-    │ upper-lt │  upper-l │  upper   │ upper-r  │ upper-rt │
-    ├──────────┼──────────┼──────────┼──────────┼──────────┤
-    │ slightly │ slightly │          │ slightly │ slightly │
-    │   lt     │    l     │  centre  │    r     │    rt    │
-    ├──────────┼──────────┼── centre ┼──────────┼──────────┤
-    │ slightly │ slightly │          │ slightly │ slightly │
-    │   lb     │    l     │          │    r     │    rb    │
-    └──────────┴──────────┴──────────┴──────────┴──────────┘
+    Return:
+      • code: str  –  '01' for top-left, incrementing left→right, top→bottom,
+                     centre cell = '00'
+      • dist: float – Euclidean distance from screen center
+    Uses a 7×7 grid for higher sensitivity.
     """
-    # relative position in [0,1]
+    # 1) Relative in [0,1]
     rel_x, rel_y = x / W, y / H
 
-    # fine grid thresholds (5×5)
-    #   0.00 0.20 0.40 0.60 0.80 1.00
-    idx_x = int(min(4, rel_x // .20))
-    idx_y = int(min(4, rel_y // .20))
+    # 2) Grid size
+    N = 7
+    idx_x = int(min(N-1, rel_x * N))
+    idx_y = int(min(N-1, rel_y * N))
 
-    # map indices to words
-    hori = ['left', 'slightly left', 'centre', 'slightly right', 'right']
-    vert = ['upper', 'slightly upper', 'centre', 'slightly lower', 'lower']
-
-    # small dead-centre (5 % of each dimension)
-    if abs(rel_x - .5) < .05 and abs(rel_y - .5) < .05:
-        region = 'dead-centre'
+    # 3) Centre cell check
+    center = N // 2  # 3
+    if idx_x == center and idx_y == center:
+        code = '00'
     else:
-        region = f'{vert[idx_y]} {hori[idx_x]}'.replace('centre centre', 'centre')
+        num = idx_y * N + idx_x + 1  # 1…49
+        code = f'{num:02d}'
 
-    # Euclidean distance to screen centre
+    # 4) Distance from centre
     dist = math.hypot(x - W/2, y - H/2)
-    return region.strip(), dist
+
+    return code, dist
 
 def draw_arrow(img: Image.Image, ang_xy, save=None, show=False):
-    w, h      = img.size
-    cx, cy    = w / 2, h / 2
-    scale     = min(w, h) / 4
-    ex, ey    = cx + ang_xy[0] * scale, cy + ang_xy[1] * scale
+    """
+    Draw the gaze arrow and overlay all 5×5 region centers labeled with codes.
+    """
+    w, h = img.size
+    cx, cy = w/2, h/2
+    scale = min(w, h) / 4
+    ex, ey = cx + ang_xy[0]*scale, cy + ang_xy[1]*scale
 
-    fig, ax = plt.subplots(figsize=(8, 6))
+    fig, ax = plt.subplots(figsize=(8,6))
     ax.imshow(img)
     ax.axis('off')
 
-    # ─── draw a single arrow from centre to end-point ──────────────────
-    ax.annotate(
-        '',                     # no text
-        xy=(ex, ey),            # arrow tip
-        xytext=(cx, cy),        # arrow tail
-        arrowprops=dict(
-            arrowstyle='->',    # normal arrow-head
-            linewidth=3,
-            color='red',
-            shrinkA=0, shrinkB=0   # don’t shorten at either end
-        )
-    )
+    # 1) plot all grid‐cell centers and codes
+    for row in range(5):
+        for col in range(5):
+            # cell center
+            gx = (col + 0.5) * w / 5
+            gy = (row + 0.5) * h / 5
+
+            # compute code: center cell = '00', else 01..25
+            if row == 2 and col == 2:
+                code = '00'
+            else:
+                num = row*5 + col + 1
+                code = f'{num:02d}'
+
+            # plot marker and label
+            ax.plot(gx, gy, marker='.', color='white', markersize=8, alpha=0.6)
+            ax.text(gx, gy, code, color='white', fontsize=6,
+                    ha='center', va='center', alpha=0.8)
+
+    # 2) draw a single red arrow
+    ax.annotate('', xy=(ex,ey), xytext=(cx,cy),
+                arrowprops=dict(arrowstyle='->', color='red', linewidth=3, shrinkA=0, shrinkB=0))
 
     ax.set_title(f'angle ({ang_xy[0]:+.2f}, {ang_xy[1]:+.2f})')
 
     if save:
         fig.savefig(save, bbox_inches='tight')
         print(f'✓ saved {save}')
-    # if show:
-    #     plt.show()
+    if show:
+        plt.show()
     plt.close(fig)
 
 def auto_crop_face(pil_img, margin=0.25):
